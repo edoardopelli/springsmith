@@ -10,7 +10,15 @@
     <packaging>jar</packaging>
 
     <name>springsmith</name>
-    <description>Scaffolding CRUD automatico via annotation processor</description>
+    <description>Automatic CRUD scaffolding via annotation processor</description>
+
+	<scm>
+	  <connection>scm:git:git://github.com/edoardopelli/springsmith.git</connection>
+	  <developerConnection>scm:git:ssh://github.com/edoardopelli/springsmith.git</developerConnection>
+	  <url>https://github.com/edoardopelli/springsmith</url>
+	  <tag>HEAD</tag>
+	</scm>
+
 
     <properties>
         <java.version>17</java.version>
