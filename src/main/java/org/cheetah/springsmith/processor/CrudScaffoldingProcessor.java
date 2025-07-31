@@ -1,12 +1,10 @@
-package a;
+package org.cheetah.springsmith.processor;
 
 import java.io.IOException;
-import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import javax.annotation.processing.AbstractProcessor;
 import javax.annotation.processing.Messager;
@@ -14,13 +12,11 @@ import javax.annotation.processing.ProcessingEnvironment;
 import javax.annotation.processing.Processor;
 import javax.annotation.processing.RoundEnvironment;
 import javax.annotation.processing.SupportedAnnotationTypes;
-import javax.annotation.processing.SupportedOptions;
 import javax.annotation.processing.SupportedSourceVersion;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.AnnotationMirror;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.Modifier;
-import javax.lang.model.element.PackageElement;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
 import javax.lang.model.type.TypeMirror;
@@ -29,20 +25,18 @@ import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
 
-import org.springframework.javapoet.AnnotationSpec;
-import org.springframework.javapoet.ClassName;
-import org.springframework.javapoet.FieldSpec;
-import org.springframework.javapoet.JavaFile;
-import org.springframework.javapoet.MethodSpec;
-import org.springframework.javapoet.ParameterSpec;
-import org.springframework.javapoet.ParameterizedTypeName;
-import org.springframework.javapoet.TypeName;
-import org.springframework.javapoet.TypeSpec;
-
 import com.google.auto.service.AutoService;
+import com.squareup.javapoet.AnnotationSpec;
+import com.squareup.javapoet.ClassName;
+import com.squareup.javapoet.FieldSpec;
+import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.MethodSpec;
+import com.squareup.javapoet.ParameterSpec;
+import com.squareup.javapoet.ParameterizedTypeName;
+import com.squareup.javapoet.TypeName;
+import com.squareup.javapoet.TypeSpec;
 
 @AutoService(Processor.class)
-@SupportedOptions({})
 @SupportedSourceVersion(SourceVersion.RELEASE_17)
 @SupportedAnnotationTypes({
         "javax.persistence.Entity",
@@ -53,6 +47,7 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
     private Messager messager;
     private Elements elementUtils;
     private Types typeUtils;
+
     private static final String BASE_PACKAGE_SUFFIX_DTO = "dtos";
     private static final String BASE_PACKAGE_SUFFIX_MAPPER = "mappers";
     private static final String BASE_PACKAGE_SUFFIX_REPO = "repositories";
@@ -85,64 +80,50 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
             try {
                 generateForEntity(entity);
             } catch (Exception ex) {
-                messager.printMessage(Diagnostic.Kind.ERROR, "Errore generazione per " + entity.getSimpleName() + ": " + ex.getMessage());
+                messager.printMessage(Diagnostic.Kind.ERROR,
+                        "Errore generazione per " + entity.getSimpleName() + ": " + ex.getMessage());
             }
         }
-        return true;
+
+        return true; // claim annotations
     }
 
     private void generateForEntity(TypeElement entity) throws IOException {
         String entitySimple = entity.getSimpleName().toString();
-        PackageElement pkg = elementUtils.getPackageOf(entity);
-        String entityPackage = pkg.getQualifiedName().toString();
-        String basePackage = deriveBasePackage(entityPackage);
+        String entityPackage = elementUtils.getPackageOf(entity).getQualifiedName().toString();
 
         // DTO
-        TypeSpec dto = buildDto(entity, entitySimple, basePackage);
+        TypeSpec dto = buildDto(entity, entitySimple);
         JavaFile.builder(replaceLastPackageSegment(entityPackage, BASE_PACKAGE_SUFFIX_DTO), dto)
                 .build()
                 .writeTo(processingEnv.getFiler());
 
         // Mapper
-        TypeSpec mapper = buildMapper(entity, entitySimple, basePackage);
+        TypeSpec mapper = buildMapper(entity, entitySimple);
         JavaFile.builder(replaceLastPackageSegment(entityPackage, BASE_PACKAGE_SUFFIX_MAPPER), mapper)
                 .build()
                 .writeTo(processingEnv.getFiler());
 
         // Repository
-        TypeSpec repository = buildRepository(entity, entitySimple, basePackage);
+        TypeSpec repository = buildRepository(entity, entitySimple);
         JavaFile.builder(replaceLastPackageSegment(entityPackage, BASE_PACKAGE_SUFFIX_REPO), repository)
                 .build()
                 .writeTo(processingEnv.getFiler());
 
         // Service
-        TypeSpec service = buildService(entity, entitySimple, basePackage);
+        TypeSpec service = buildService(entity, entitySimple);
         JavaFile.builder(replaceLastPackageSegment(entityPackage, BASE_PACKAGE_SUFFIX_SERVICE), service)
                 .build()
                 .writeTo(processingEnv.getFiler());
 
         // Controller
-        TypeSpec controller = buildController(entity, entitySimple, basePackage);
+        TypeSpec controller = buildController(entity, entitySimple);
         JavaFile.builder(replaceLastPackageSegment(entityPackage, BASE_PACKAGE_SUFFIX_CONTROLLER), controller)
                 .build()
                 .writeTo(processingEnv.getFiler());
     }
 
-    private String deriveBasePackage(String entityPackage) {
-        int lastDot = entityPackage.lastIndexOf('.');
-        if (lastDot == -1) return entityPackage;
-        return entityPackage.substring(0, lastDot + 1);
-    }
-
-    private String replaceLastPackageSegment(String original, String newLastSegment) {
-        int lastDot = original.lastIndexOf('.');
-        if (lastDot == -1) {
-            return newLastSegment;
-        }
-        return original.substring(0, lastDot + 1) + newLastSegment;
-    }
-
-    private TypeSpec buildDto(TypeElement entity, String entitySimple, String basePackage) {
+    private TypeSpec buildDto(TypeElement entity, String entitySimple) {
         String dtoName = entitySimple + "DTO";
         TypeSpec.Builder builder = TypeSpec.classBuilder(dtoName)
                 .addModifiers(Modifier.PUBLIC)
@@ -150,43 +131,50 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
                 .addAnnotation(ClassName.get("lombok", "NoArgsConstructor"))
                 .addAnnotation(ClassName.get("lombok", "AllArgsConstructor"))
                 .addAnnotation(AnnotationSpec.builder(ClassName.get("com.fasterxml.jackson.annotation", "JsonInclude"))
-                        .addMember("value", "$T.$L", ClassName.get("com.fasterxml.jackson.annotation", "JsonInclude.Include"), "NON_NULL")
+                        .addMember("value", "$T.$L",
+                                ClassName.get("com.fasterxml.jackson.annotation", "JsonInclude.Include"),
+                                "NON_NULL")
                         .build());
 
-        // fields
         for (VariableElement field : ElementFilter.fieldsIn(entity.getEnclosedElements())) {
             if (field.getModifiers().contains(Modifier.STATIC)) continue;
-            if (isCollection(field)) {
-                // skip OneToMany / ManyToMany
-                if (hasAnnotation(field, "javax.persistence.OneToMany") ||
-                        hasAnnotation(field, "jakarta.persistence.OneToMany") ||
-                        hasAnnotation(field, "javax.persistence.ManyToMany") ||
-                        hasAnnotation(field, "jakarta.persistence.ManyToMany")) {
-                    continue;
-                }
+
+            // Skip OneToMany / ManyToMany collections
+            if (isCollection(field) &&
+                    (hasAnnotation(field, "javax.persistence.OneToMany") ||
+                            hasAnnotation(field, "jakarta.persistence.OneToMany") ||
+                            hasAnnotation(field, "javax.persistence.ManyToMany") ||
+                            hasAnnotation(field, "jakarta.persistence.ManyToMany"))) {
+                continue;
             }
+
+            // ManyToOne or OneToOne -> only include referenced ID
             if (hasAnnotation(field, "javax.persistence.ManyToOne") ||
                     hasAnnotation(field, "jakarta.persistence.ManyToOne") ||
                     hasAnnotation(field, "javax.persistence.OneToOne") ||
                     hasAnnotation(field, "jakarta.persistence.OneToOne")) {
-                // include only reference id
                 TypeMirror referenced = field.asType();
-                TypeElement refElement = (TypeElement) typeUtils.asElement(referenced);
-                Optional<VariableElement> idField = findIdField(refElement);
-                if (idField.isPresent()) {
-                    TypeName idType = TypeName.get(idField.get().asType());
-                    String name = field.getSimpleName().toString() + "Id";
-                    builder.addField(FieldSpec.builder(idType, name, Modifier.PRIVATE).build());
+                Element referencedEl = typeUtils.asElement(referenced);
+                if (referencedEl instanceof TypeElement) {
+                    Optional<VariableElement> idField = findIdField((TypeElement) referencedEl);
+                    if (idField.isPresent()) {
+                        TypeName idType = TypeName.get(idField.get().asType());
+                        String name = field.getSimpleName().toString() + "Id";
+                        builder.addField(FieldSpec.builder(idType, name, Modifier.PRIVATE).build());
+                    }
                 }
                 continue;
             }
+
+            // Skip other relation collections
             if (hasAnnotation(field, "javax.persistence.ManyToMany") ||
                     hasAnnotation(field, "jakarta.persistence.ManyToMany") ||
                     hasAnnotation(field, "javax.persistence.OneToMany") ||
                     hasAnnotation(field, "jakarta.persistence.OneToMany")) {
-                continue; // skip
+                continue;
             }
-            // normal field
+
+            // Simple scalar field
             TypeName typeName = TypeName.get(field.asType());
             String name = field.getSimpleName().toString();
             builder.addField(FieldSpec.builder(typeName, name, Modifier.PRIVATE).build());
@@ -194,29 +182,13 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
         return builder.build();
     }
 
-    private MethodSpec generateGetter(String name, TypeName type) {
-        String methodName = "get" + capitalize(name);
-        return MethodSpec.methodBuilder(methodName)
-                .addModifiers(Modifier.PUBLIC)
-                .returns(type)
-                .addStatement("return this.$N", name)
-                .build();
-    }
-
-    private MethodSpec generateSetter(String name, TypeName type) {
-        String methodName = "set" + capitalize(name);
-        return MethodSpec.methodBuilder(methodName)
-                .addModifiers(Modifier.PUBLIC)
-                .addParameter(type, name)
-                .addStatement("this.$N = $N", name, name)
-                .build();
-    }
-
-    private TypeSpec buildMapper(TypeElement entity, String entitySimple, String basePackage) {
+    private TypeSpec buildMapper(TypeElement entity, String entitySimple) {
         String dtoName = entitySimple + "DTO";
         String mapperName = entitySimple + "Mapper";
-        ClassName entityClass = ClassName.get(elementUtils.getPackageOf(entity).getQualifiedName().toString(), entitySimple);
-        ClassName dtoClass = ClassName.get(replaceLastPackageSegment(elementUtils.getPackageOf(entity).getQualifiedName().toString(), BASE_PACKAGE_SUFFIX_DTO), dtoName);
+        String entityPkg = elementUtils.getPackageOf(entity).getQualifiedName().toString();
+
+        ClassName entityClass = ClassName.get(entityPkg, entitySimple);
+        ClassName dtoClass = ClassName.get(replaceLastPackageSegment(entityPkg, BASE_PACKAGE_SUFFIX_DTO), dtoName);
 
         AnnotationSpec mapperAnno = AnnotationSpec.builder(ClassName.get("org.mapstruct", "Mapper"))
                 .addMember("componentModel", "$S", "spring")
@@ -227,12 +199,12 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
                 .addAnnotation(mapperAnno)
                 .addModifiers(Modifier.PUBLIC);
 
-        // toDTO with @Mapping for ManyToOne -> id
+        // toDTO
         MethodSpec.Builder toDto = MethodSpec.methodBuilder("to" + entitySimple + "DTO")
                 .addModifiers(Modifier.PUBLIC, Modifier.ABSTRACT)
                 .returns(dtoClass)
                 .addParameter(entityClass, decap(entitySimple));
-        // add mappings for ManyToOne
+
         for (VariableElement field : ElementFilter.fieldsIn(entity.getEnclosedElements())) {
             if (hasAnnotation(field, "javax.persistence.ManyToOne") ||
                     hasAnnotation(field, "jakarta.persistence.ManyToOne") ||
@@ -247,16 +219,14 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
                         .build());
             }
         }
-        toDto.addParameter(entityClass, decap(entitySimple));
         builder.addMethod(toDto.build());
 
-        // toEntity: ignore complex relation, let service gestire
+        // toEntity (ignore relations, service le risolve se serve)
         MethodSpec.Builder toEntity = MethodSpec.methodBuilder("to" + entitySimple)
                 .addModifiers(Modifier.PUBLIC, Modifier.ABSTRACT)
                 .returns(entityClass)
                 .addParameter(dtoClass, decap(dtoName));
 
-        // ignore mappings for related objects (ManyToOne)
         for (VariableElement field : ElementFilter.fieldsIn(entity.getEnclosedElements())) {
             if (hasAnnotation(field, "javax.persistence.ManyToOne") ||
                     hasAnnotation(field, "jakarta.persistence.ManyToOne") ||
@@ -274,16 +244,17 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
         return builder.build();
     }
 
-    private TypeSpec buildRepository(TypeElement entity, String entitySimple, String basePackage) {
+    private TypeSpec buildRepository(TypeElement entity, String entitySimple) {
         String repoName = entitySimple + "Repository";
-        TypeElement jpaRepoElement = elementUtils.getTypeElement("org.springframework.data.jpa.repository.JpaRepository");
+        String entityPkg = elementUtils.getPackageOf(entity).getQualifiedName().toString();
+
         Optional<VariableElement> idFieldOpt = findIdField(entity);
         if (idFieldOpt.isEmpty()) {
-            messager.printMessage(Diagnostic.Kind.WARNING, "Entità " + entitySimple + " senza @Id: salta repository");
-            return TypeSpec.interfaceBuilder("Empty").build();
+            messager.printMessage(Diagnostic.Kind.WARNING, "Entità " + entitySimple + " senza @Id, salto repository.");
+            return TypeSpec.interfaceBuilder(repoName).addModifiers(Modifier.PUBLIC).build();
         }
         TypeName idType = TypeName.get(idFieldOpt.get().asType());
-        ClassName entityClass = ClassName.get(elementUtils.getPackageOf(entity).getQualifiedName().toString(), entitySimple);
+        ClassName entityClass = ClassName.get(entityPkg, entitySimple);
         ParameterizedTypeName superInterface = ParameterizedTypeName.get(
                 ClassName.get("org.springframework.data.jpa.repository", "JpaRepository"),
                 entityClass,
@@ -297,29 +268,30 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
                 .build();
     }
 
-    private TypeSpec buildService(TypeElement entity, String entitySimple, String basePackage) {
+    private TypeSpec buildService(TypeElement entity, String entitySimple) {
         String serviceName = entitySimple + "Service";
         String dtoName = entitySimple + "DTO";
         String repoName = entitySimple + "Repository";
         String mapperName = entitySimple + "Mapper";
 
-        ClassName entityClass = ClassName.get(elementUtils.getPackageOf(entity).getQualifiedName().toString(), entitySimple);
-        ClassName dtoClass = ClassName.get(replaceLastPackageSegment(elementUtils.getPackageOf(entity).getQualifiedName().toString(), BASE_PACKAGE_SUFFIX_DTO), dtoName);
-        ClassName repoClass = ClassName.get(replaceLastPackageSegment(elementUtils.getPackageOf(entity).getQualifiedName().toString(), BASE_PACKAGE_SUFFIX_REPO), repoName);
-        ClassName mapperClass = ClassName.get(replaceLastPackageSegment(elementUtils.getPackageOf(entity).getQualifiedName().toString(), BASE_PACKAGE_SUFFIX_MAPPER), mapperName);
+        String entityPkg = elementUtils.getPackageOf(entity).getQualifiedName().toString();
 
-        String idFieldName = findIdField(entity).map(VariableElement::getSimpleName).map(Object::toString).orElse("id");
-        TypeName idType = findIdField(entity).map(f -> TypeName.get(f.asType())).orElse(TypeName.OBJECT);
+        ClassName entityClass = ClassName.get(entityPkg, entitySimple);
+        ClassName dtoClass = ClassName.get(replaceLastPackageSegment(entityPkg, BASE_PACKAGE_SUFFIX_DTO), dtoName);
+        ClassName repoClass = ClassName.get(replaceLastPackageSegment(entityPkg, BASE_PACKAGE_SUFFIX_REPO), repoName);
+        ClassName mapperClass = ClassName.get(replaceLastPackageSegment(entityPkg, BASE_PACKAGE_SUFFIX_MAPPER), mapperName);
+
+        Optional<VariableElement> idFieldOpt = findIdField(entity);
+        String idFieldName = idFieldOpt.map(VariableElement::getSimpleName).map(Object::toString).orElse("id");
+        TypeName idType = idFieldOpt.map(f -> TypeName.get(f.asType())).orElse(ClassName.get(Long.class));
 
         TypeSpec.Builder builder = TypeSpec.classBuilder(serviceName)
                 .addModifiers(Modifier.PUBLIC)
                 .addAnnotation(ClassName.get("org.springframework.stereotype", "Service"));
 
         // fields
-        FieldSpec repoField = FieldSpec.builder(repoClass, decap(repoName), Modifier.PRIVATE, Modifier.FINAL).build();
-        FieldSpec mapperField = FieldSpec.builder(mapperClass, decap(mapperName), Modifier.PRIVATE, Modifier.FINAL).build();
-        builder.addField(repoField);
-        builder.addField(mapperField);
+        builder.addField(FieldSpec.builder(repoClass, decap(repoName), Modifier.PRIVATE, Modifier.FINAL).build());
+        builder.addField(FieldSpec.builder(mapperClass, decap(mapperName), Modifier.PRIVATE, Modifier.FINAL).build());
 
         // constructor
         MethodSpec constructor = MethodSpec.constructorBuilder()
@@ -335,11 +307,24 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
         MethodSpec findAll = MethodSpec.methodBuilder("findAll")
                 .addModifiers(Modifier.PUBLIC)
                 .returns(ParameterizedTypeName.get(ClassName.get(List.class), dtoClass))
-                .addStatement("java.util.List<$T> entities = $N.findAll()", entityClass, decap(repoName))
+                .addStatement("$T entities = $N.findAll()", ParameterizedTypeName.get(ClassName.get(List.class), entityClass), decap(repoName))
                 .addStatement("return entities.stream().map($N::to$LDTO).collect($T.toList())",
-                        decap(mapperName), entitySimple, Collectors.class)
+                        decap(mapperName), entitySimple, ClassName.get("java.util.stream", "Collectors"))
                 .build();
         builder.addMethod(findAll);
+
+        // findById
+        MethodSpec findById = MethodSpec.methodBuilder("findById")
+                .addModifiers(Modifier.PUBLIC)
+                .returns(dtoClass)
+                .addParameter(idType, idFieldName)
+                .addStatement("$T entity = $N.findById($N).orElseThrow(() -> new $T($S))",
+                        entityClass, decap(repoName), idFieldName,
+                        ClassName.get("jakarta.persistence", "EntityNotFoundException"),
+                        entitySimple + " non trovato con id " + "\" + " + idFieldName + " + \"")
+                .addStatement("return $N.to$LDTO(entity)", decap(mapperName), entitySimple)
+                .build();
+        builder.addMethod(findById);
 
         // save
         MethodSpec save = MethodSpec.methodBuilder("save")
@@ -358,13 +343,13 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
                 .returns(dtoClass)
                 .addParameter(idType, idFieldName)
                 .addParameter(dtoClass, "dto")
-                .addStatement("$T entity = $N.findById($N).orElseThrow(() -> new $T($S))",
+                .addStatement("$T existing = $N.findById($N).orElseThrow(() -> new $T($S))",
                         entityClass, decap(repoName), idFieldName,
                         ClassName.get("jakarta.persistence", "EntityNotFoundException"),
                         entitySimple + " non trovato con id " + "\" + " + idFieldName + " + \"")
-                // semplice aggiornamento: rigenera da dto salvo
-                .addStatement("entity = $N.to$L(dto)", decap(mapperName), entitySimple)
-                .addStatement("$T updated = $N.save(entity)", entityClass, decap(repoName))
+                // per semplicità, sovrascrive completamente
+                .addStatement("existing = $N.to$L(dto)", decap(mapperName), entitySimple)
+                .addStatement("$T updated = $N.save(existing)", entityClass, decap(repoName))
                 .addStatement("return $N.to$LDTO(updated)", decap(mapperName), entitySimple)
                 .build();
         builder.addMethod(update);
@@ -380,14 +365,17 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
         return builder.build();
     }
 
-    private TypeSpec buildController(TypeElement entity, String entitySimple, String basePackage) {
+    private TypeSpec buildController(TypeElement entity, String entitySimple) {
         String controllerName = entitySimple + "Controller";
         String serviceName = entitySimple + "Service";
         String dtoName = entitySimple + "DTO";
 
+        String entityPkg = elementUtils.getPackageOf(entity).getQualifiedName().toString();
         String path = "/" + pluralize(lowerFirst(entitySimple));
-        ClassName serviceClass = ClassName.get(replaceLastPackageSegment(elementUtils.getPackageOf(entity).getQualifiedName().toString(), BASE_PACKAGE_SUFFIX_SERVICE), serviceName);
-        ClassName dtoClass = ClassName.get(replaceLastPackageSegment(elementUtils.getPackageOf(entity).getQualifiedName().toString(), BASE_PACKAGE_SUFFIX_DTO), dtoName);
+
+        ClassName serviceClass = ClassName.get(replaceLastPackageSegment(entityPkg, BASE_PACKAGE_SUFFIX_SERVICE), serviceName);
+        ClassName dtoClass = ClassName.get(replaceLastPackageSegment(entityPkg, BASE_PACKAGE_SUFFIX_DTO), dtoName);
+
         Optional<VariableElement> idFieldOpt = findIdField(entity);
         TypeName idType = idFieldOpt.map(f -> TypeName.get(f.asType())).orElse(ClassName.get(Long.class));
         String idName = idFieldOpt.map(VariableElement::getSimpleName).map(Object::toString).orElse("id");
@@ -399,9 +387,8 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
                         .addMember("value", "$S", "/api" + path)
                         .build());
 
-        // service field + constructor
-        FieldSpec serviceField = FieldSpec.builder(serviceClass, decap(serviceName), Modifier.PRIVATE, Modifier.FINAL).build();
-        builder.addField(serviceField);
+        // field + ctor
+        builder.addField(FieldSpec.builder(serviceClass, decap(serviceName), Modifier.PRIVATE, Modifier.FINAL).build());
         MethodSpec constructor = MethodSpec.constructorBuilder()
                 .addModifiers(Modifier.PUBLIC)
                 .addParameter(serviceClass, decap(serviceName))
@@ -428,10 +415,10 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
                         .addAnnotation(AnnotationSpec.builder(ClassName.get("org.springframework.web.bind.annotation", "PathVariable")).build())
                         .build())
                 .returns(ParameterizedTypeName.get(ClassName.get("org.springframework.http", "ResponseEntity"), dtoClass))
-                .addStatement("$T dto = $N.update($N, null)", dtoClass, decap(serviceName), idName) // placeholder unless you implement findById separately
+                .addStatement("$T dto = $N.findById($N)", dtoClass, decap(serviceName), idName)
                 .addStatement("return $T.ok(dto)", ClassName.get("org.springframework.http", "ResponseEntity"))
                 .build();
-        // NOTE: getById here is a stub; idealmente service avrebbe findById e si userebbe quello.
+        builder.addMethod(getById);
 
         // POST
         MethodSpec create = MethodSpec.methodBuilder("create" + entitySimple)
@@ -442,7 +429,9 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
                         .build())
                 .returns(ParameterizedTypeName.get(ClassName.get("org.springframework.http", "ResponseEntity"), dtoClass))
                 .addStatement("$T created = $N.save(dto)", dtoClass, decap(serviceName))
-                .addStatement("return $T.status($T.CREATED).body(created)", ClassName.get("org.springframework.http", "ResponseEntity"), ClassName.get("org.springframework.http", "HttpStatus"))
+                .addStatement("return $T.status($T.CREATED).body(created)",
+                        ClassName.get("org.springframework.http", "ResponseEntity"),
+                        ClassName.get("org.springframework.http", "HttpStatus"))
                 .build();
         builder.addMethod(create);
 
@@ -473,9 +462,11 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
                 .addParameter(ParameterSpec.builder(idType, idName)
                         .addAnnotation(AnnotationSpec.builder(ClassName.get("org.springframework.web.bind.annotation", "PathVariable")).build())
                         .build())
+                .returns(ParameterizedTypeName.get(
+                        ClassName.get("org.springframework.http", "ResponseEntity"),
+                        ClassName.get(Void.class)))
                 .addStatement("$N.delete($N)", decap(serviceName), idName)
                 .addStatement("return $T.noContent().build()", ClassName.get("org.springframework.http", "ResponseEntity"))
-                .returns(ParameterizedTypeName.get(ClassName.get("org.springframework.http", "ResponseEntity"), TypeName.VOID))
                 .build();
         builder.addMethod(delete);
 
@@ -501,14 +492,17 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
 
     private boolean isCollection(VariableElement field) {
         TypeMirror t = field.asType();
-        return typeUtils.isAssignable(t, elementUtils.getTypeElement(Collection.class.getCanonicalName()).asType())
-                || typeUtils.isAssignable(t, elementUtils.getTypeElement(List.class.getCanonicalName()).asType())
-                || typeUtils.isAssignable(t, elementUtils.getTypeElement(Set.class.getCanonicalName()).asType());
+        return typeUtils.isAssignable(t, elementUtils.getTypeElement("java.util.Collection").asType())
+                || typeUtils.isAssignable(t, elementUtils.getTypeElement("java.util.List").asType())
+                || typeUtils.isAssignable(t, elementUtils.getTypeElement("java.util.Set").asType());
     }
 
-    private String capitalize(String s) {
-        if (s == null || s.isEmpty()) return s;
-        return Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    private String replaceLastPackageSegment(String original, String newLastSegment) {
+        int lastDot = original.lastIndexOf('.');
+        if (lastDot == -1) {
+            return newLastSegment;
+        }
+        return original.substring(0, lastDot + 1) + newLastSegment;
     }
 
     private String decap(String s) {
@@ -521,7 +515,6 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
     }
 
     private String pluralize(String s) {
-        // semplice pluralizzazione: se finisce con y -> ies, altrimenti aggiungi s
         if (s.endsWith("y") && s.length() > 1) {
             return s.substring(0, s.length() - 1) + "ies";
         }
