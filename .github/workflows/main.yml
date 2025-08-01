@@ -63,6 +63,7 @@ jobs:
       # Step 6: Build e tag dell'immagine Docker con la versione del tag
       - name: Version tag
         run: |
+          echo $TAG
           export REPO=$(mvn -q -f pom.xml.tag -Dexec.executable=echo -Dexec.args='${project.artifactId}' --non-recursive exec:exec)
           echo REPO=$REPO 
           export VERSION=$(mvn -q -f pom.xml.tag -Dexec.executable=echo -Dexec.args='${project.version}' --non-recursive exec:exec)
@@ -76,69 +77,3 @@ jobs:
           git commit -m "change snapshot version to next" .
           git push
 
-      - name: Checkout tag
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # serve per avere il tag referenziato
-          ref: ${{ github.ref }}  # checkout del tag specifico
-
-      - name: Set up Java 21
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-          cache: 'maven'
-
-      - name: Cache Maven repository
-        uses: actions/cache@v3
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-
-      - name: Build project
-        run: mvn -B clean package -DskipTests=false
-
-      - name: Extract coordinates
-        id: coords
-        run: |
-          ARTIFACT_ID=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.artifactId}' --non-recursive exec:exec)
-          VERSION=$(mvn -q -Dexec.executable=echo -Dexec.args='${project.version}' --non-recursive exec:exec)
-          echo "artifactId=$ARTIFACT_ID" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          TAG_NAME=${GITHUB_REF##*/}
-          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
-
-      - name: Locate produced JAR
-        id: artifact
-        run: |
-          ARTIFACT_ID=${{ steps.coords.outputs.artifactId }}
-          VERSION=${{ steps.coords.outputs.version }}
-          EXPECTED="target/${ARTIFACT_ID}-${VERSION}.jar"
-          if [ ! -f "$EXPECTED" ]; then
-            echo "Expected JAR $EXPECTED not found. Listing target/ for debugging:" >&2
-            ls -1 target/ >&2
-            exit 1
-          fi
-          echo "artifact=$EXPECTED" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.coords.outputs.tag }}
-          name: ${{ steps.coords.outputs.tag }}
-          body: |
-            Release ${{ steps.coords.outputs.tag }}
-            Built from commit ${{ github.sha }}.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload JAR to Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.coords.outputs.tag }}
-          files: ${{ steps.artifact.outputs.artifact }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
