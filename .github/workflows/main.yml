@@ -1,70 +1,78 @@
-name: Build and Publish GitHub Release
+name: Release Process for Main
 
 on:
   push:
     branches:
       - main
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
-  build-and-release:
-    name: Build, Package and Create GitHub Release
+  release:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+      # Step 1: Checkout del codice dal repository con tutti i branch e i tag
+      - name: Checkout code
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: Set up Java 17
+      # Step 2: Imposta la versione di Java 21
+      - name: Set up Zulu JDK 21
         uses: actions/setup-java@v3
         with:
-          distribution: temurin
-          java-version: '17'
-          cache: 'maven'
+          distribution: 'zulu'
+          java-version: '21'
 
-      - name: Extract version from tag
-        id: vars
-        run: |
-          TAG=${GITHUB_REF##*/}
-          echo "Tag is $TAG"
-          # strip leading 'v' if present
-          VERSION=${TAG#v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Build with Maven
-        run: mvn clean package -DskipTests=false
-
-      - name: Locate built artifact
-        id: artifact
-        run: |
-          # Adjust if your artifactId/version conventions differ
-          JAR=$(find target -maxdepth 1 -type f -name "*-jar-with-dependencies.jar" || true)
-          if [ -z "$JAR" ]; then
-            # fallback to normal jar
-            JAR=$(find target -maxdepth 1 -type f -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar" | head -n1)
-          fi
-          if [ -z "$JAR" ]; then
-            echo "No jar found in target/"; exit 1
-          fi
-          echo "artifact=$JAR" >> $GITHUB_OUTPUT
-          echo "Found $JAR"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      # Step 3: Cache Maven packages
+      - name: Cache Maven packages
+        uses: actions/cache@v3
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          body: |
-            Release ${{ github.ref_name }}
-            Built from commit ${{ github.sha }}.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
 
-      - name: Upload artifact to release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: ${{ steps.artifact.outputs.artifact }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Step 4: Configura Git con nome, email e autenticazione con GITHUB_TOKEN
+      - name: Configure Git User and Authentication
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+      # Step 5: Esegui i comandi forniti per la preparazione della release
+      - name: Execute release preparation and tagging script
+        run: |
+          #/bin/sh
+          mvn -B release:prepare-with-pom -DdryRun=true -Darguments="-DskipTests -Dmaven.javadoc.skip=true"
+          if [ $? -eq 0 ]; then
+              mvn -f pom.xml.tag clean install -DskipTests
+              export REPO=$(mvn -q -f pom.xml.tag -Dexec.executable=echo -Dexec.args='${project.artifactId}' --non-recursive exec:exec)
+              echo REPO=$REPO 
+              export VERSION=$(mvn -q -f pom.xml.tag -Dexec.executable=echo -Dexec.args='${project.version}' --non-recursive exec:exec)
+              echo VERSION=$VERSION
+              export TAG=$REPO-$VERSION
+              git tag -a $TAG -m "version $TAG"
+              git push origin $TAG
+          fi
+
+
+      # Step 6: Build e tag dell'immagine Docker con la versione del tag
+      - name: Version tag
+        run: |
+          export REPO=$(mvn -q -f pom.xml.tag -Dexec.executable=echo -Dexec.args='${project.artifactId}' --non-recursive exec:exec)
+          echo REPO=$REPO 
+          export VERSION=$(mvn -q -f pom.xml.tag -Dexec.executable=echo -Dexec.args='${project.version}' --non-recursive exec:exec)
+          echo VERSION=$VERSION
+          [ -f pom.xml.next ] && mv pom.xml.next pom.xml
+          rm -f pom.xml.next
+          rm -f pom.xml.releaseBackup
+          rm -f pom.xml.tag
+          rm -f release-pom.xml
+          rm -f release.properties
+          git commit -m "change snapshot version to next" .
+          git push
+          
