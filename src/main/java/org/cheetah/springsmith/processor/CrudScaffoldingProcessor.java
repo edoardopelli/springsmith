@@ -159,7 +159,8 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
                     Optional<VariableElement> idField = findIdField((TypeElement) referencedEl);
                     if (idField.isPresent()) {
                         TypeName idType = TypeName.get(idField.get().asType());
-                        String name = field.getSimpleName().toString() + "Id";
+                        String base = field.getSimpleName().toString();
+                        String name = base.endsWith("Id") ? base : base + "Id";
                         builder.addField(FieldSpec.builder(idType, name, Modifier.PRIVATE).build());
                     }
                 }
@@ -211,7 +212,7 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
                     hasAnnotation(field, "javax.persistence.OneToOne") ||
                     hasAnnotation(field, "jakarta.persistence.OneToOne")) {
                 String fieldName = field.getSimpleName().toString();
-                String target = fieldName + "Id";
+                String target = fieldName.endsWith("Id") ? fieldName : fieldName + "Id";
                 String source = fieldName + ".id";
                 toDto.addAnnotation(AnnotationSpec.builder(ClassName.get("org.mapstruct", "Mapping"))
                         .addMember("source", "$S", source)
@@ -221,7 +222,7 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
         }
         builder.addMethod(toDto.build());
 
-        // toEntity (ignore relations, service le risolve se serve)
+        // toEntity (ignore relations)
         MethodSpec.Builder toEntity = MethodSpec.methodBuilder("to" + entitySimple)
                 .addModifiers(Modifier.PUBLIC, Modifier.ABSTRACT)
                 .returns(entityClass)
