@@ -75,10 +75,7 @@ jobs:
           rm -f release.properties
           git commit -m "change snapshot version to next" .
           git push
-  publish:
-    runs-on: ubuntu-latest
 
-    steps:
       - name: Checkout tag
         uses: actions/checkout@v4
         with:
