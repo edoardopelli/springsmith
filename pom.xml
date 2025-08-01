@@ -3,7 +3,7 @@
 
     <groupId>org.cheetah</groupId>
     <artifactId>springsmith</artifactId>
-    <version>1.0.3-SNAPSHOT</version>
+    <version>1.0.4-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>springsmith</name>
