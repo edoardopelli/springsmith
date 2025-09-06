@@ -211,69 +211,114 @@ public class CrudScaffoldingProcessor extends AbstractProcessor {
         if (s == null || s.isEmpty()) return s;
         return Character.toUpperCase(s.charAt(0)) + s.substring(1);
     }
-    private TypeSpec buildMapper(TypeElement entity, String entitySimple) {
-        String dtoName = entitySimple + "DTO";
-        String mapperName = entitySimple + "Mapper";
-        String entityPkg = elementUtils.getPackageOf(entity).getQualifiedName().toString();
+private TypeSpec buildMapper(TypeElement entity, String entitySimple) {
+    String dtoName = entitySimple + "DTO";
+    String mapperName = entitySimple + "Mapper";
+    String entityPkg = elementUtils.getPackageOf(entity).getQualifiedName().toString();
 
-        ClassName entityClass = ClassName.get(entityPkg, entitySimple);
-        ClassName dtoClass = ClassName.get(replaceLastPackageSegment(entityPkg, BASE_PACKAGE_SUFFIX_DTO), dtoName);
+    ClassName entityClass = ClassName.get(entityPkg, entitySimple);
+    ClassName dtoClass = ClassName.get(replaceLastPackageSegment(entityPkg, BASE_PACKAGE_SUFFIX_DTO), dtoName);
 
-        AnnotationSpec mapperAnno = AnnotationSpec.builder(ClassName.get("org.mapstruct", "Mapper"))
-                .addMember("componentModel", "$S", "spring")
-                .addMember("unmappedTargetPolicy", "$T.IGNORE", ClassName.get("org.mapstruct", "ReportingPolicy"))
-                .build();
+    AnnotationSpec mapperAnno = AnnotationSpec.builder(ClassName.get("org.mapstruct", "Mapper"))
+            .addMember("componentModel", "$S", "spring")
+            .addMember("unmappedTargetPolicy", "$T.IGNORE", ClassName.get("org.mapstruct", "ReportingPolicy"))
+            .build();
 
-        TypeSpec.Builder builder = TypeSpec.interfaceBuilder(mapperName)
-                .addAnnotation(mapperAnno)
-                .addModifiers(Modifier.PUBLIC);
+    TypeSpec.Builder builder = TypeSpec.interfaceBuilder(mapperName)
+            .addAnnotation(mapperAnno)
+            .addModifiers(Modifier.PUBLIC);
 
-        // toDTO
-        MethodSpec.Builder toDto = MethodSpec.methodBuilder("to" + entitySimple + "DTO")
-                .addModifiers(Modifier.PUBLIC, Modifier.ABSTRACT)
-                .returns(dtoClass)
-                .addParameter(entityClass, decap(entitySimple));
+    // ===== toDTO =====
+    MethodSpec.Builder toDto = MethodSpec.methodBuilder("to" + entitySimple + "DTO")
+            .addModifiers(Modifier.PUBLIC, Modifier.ABSTRACT)
+            .returns(dtoClass)
+            .addParameter(entityClass, decap(entitySimple));
 
-        for (VariableElement field : ElementFilter.fieldsIn(entity.getEnclosedElements())) {
-            if (hasAnnotation(field, "javax.persistence.ManyToOne") ||
-                    hasAnnotation(field, "jakarta.persistence.ManyToOne") ||
-                    hasAnnotation(field, "javax.persistence.OneToOne") ||
-                    hasAnnotation(field, "jakarta.persistence.OneToOne")) {
-                String fieldName = field.getSimpleName().toString();
-                String target = fieldName.endsWith("Id") ? fieldName : fieldName + "Id";
-                String source = fieldName + ".id";
-                toDto.addAnnotation(AnnotationSpec.builder(ClassName.get("org.mapstruct", "Mapping"))
-                        .addMember("source", "$S", source)
-                        .addMember("target", "$S", target)
-                        .build());
+    for (VariableElement field : ElementFilter.fieldsIn(entity.getEnclosedElements())) {
+        if (hasAnnotation(field, "javax.persistence.ManyToOne") ||
+            hasAnnotation(field, "jakarta.persistence.ManyToOne") ||
+            hasAnnotation(field, "javax.persistence.OneToOne") ||
+            hasAnnotation(field, "jakarta.persistence.OneToOne")) {
+
+            String fieldName = field.getSimpleName().toString();
+            String target = fieldName.endsWith("Id") ? fieldName : fieldName + "Id";
+            String source = fieldName + ".id";
+            toDto.addAnnotation(AnnotationSpec.builder(ClassName.get("org.mapstruct", "Mapping"))
+                    .addMember("source", "$S", source)
+                    .addMember("target", "$S", target)
+                    .build());
+        }
+    }
+    builder.addMethod(toDto.build());
+
+    // ===== toEntity =====
+    MethodSpec.Builder toEntity = MethodSpec.methodBuilder("to" + entitySimple)
+            .addModifiers(Modifier.PUBLIC, Modifier.ABSTRACT)
+            .returns(entityClass)
+            .addParameter(dtoClass, decap(dtoName));
+
+    // Per evitare helper duplicati per lo stesso tipo relazione
+    Set<String> helperGeneratedFor = new HashSet<>();
+
+    for (VariableElement field : ElementFilter.fieldsIn(entity.getEnclosedElements())) {
+        boolean isRelation =
+                hasAnnotation(field, "javax.persistence.ManyToOne") ||
+                hasAnnotation(field, "jakarta.persistence.ManyToOne") ||
+                hasAnnotation(field, "javax.persistence.OneToOne") ||
+                hasAnnotation(field, "jakarta.persistence.OneToOne");
+
+        if (!isRelation) continue;
+
+        String fieldName = field.getSimpleName().toString();
+        String sourceIdName = fieldName.endsWith("Id") ? fieldName : fieldName + "Id";
+
+        // Mappiamo <campo>Id (DTO) -> <campo> (Entity)
+        toEntity.addAnnotation(AnnotationSpec.builder(ClassName.get("org.mapstruct", "Mapping"))
+                .addMember("target", "$S", fieldName)
+                .addMember("source", "$S", sourceIdName)
+                .build());
+
+        // Genera helper: IdType -> RelatedEntity (una sola volta per tipo)
+        TypeElement relatedEl = (TypeElement) typeUtils.asElement(field.asType());
+        if (relatedEl != null) {
+            Optional<VariableElement> relatedIdField = findIdField(relatedEl);
+            if (relatedIdField.isPresent()) {
+                String relatedFqn = relatedEl.getQualifiedName().toString();
+                if (helperGeneratedFor.add(relatedFqn)) {
+                    String relatedSimple = relatedEl.getSimpleName().toString();
+                    String relatedPkg = elementUtils.getPackageOf(relatedEl).getQualifiedName().toString();
+                    ClassName relatedClass = ClassName.get(relatedPkg, relatedSimple);
+
+                    String idFieldName = relatedIdField.get().getSimpleName().toString();
+                    TypeName idType = TypeName.get(relatedIdField.get().asType());
+
+                    MethodSpec helper = MethodSpec.methodBuilder("map" + relatedSimple + "FromId")
+                            .addModifiers(Modifier.PUBLIC, Modifier.DEFAULT)
+                            .returns(relatedClass)
+                            .addParameter(idType, "id")
+                            .beginControlFlow("if (id == null)")
+                            .addStatement("return null")
+                            .endControlFlow()
+                            .addStatement("$T e = new $T()", relatedClass, relatedClass)
+                            .addStatement("e.set$L(id)", capitalize(idFieldName))
+                            .addStatement("return e")
+                            .build();
+
+                    builder.addMethod(helper);
+                }
+            } else {
+                messager.printMessage(Diagnostic.Kind.WARNING,
+                    "Relazione '" + fieldName + "' -> " + relatedEl.getSimpleName() + " senza @Id; non genero helper.");
             }
         }
-        builder.addMethod(toDto.build());
-
-        // toEntity (ignore complex relations)
-        MethodSpec.Builder toEntity = MethodSpec.methodBuilder("to" + entitySimple)
-                .addModifiers(Modifier.PUBLIC, Modifier.ABSTRACT)
-                .returns(entityClass)
-                .addParameter(dtoClass, decap(dtoName));
-
-        for (VariableElement field : ElementFilter.fieldsIn(entity.getEnclosedElements())) {
-            if (hasAnnotation(field, "javax.persistence.ManyToOne") ||
-                    hasAnnotation(field, "jakarta.persistence.ManyToOne") ||
-                    hasAnnotation(field, "javax.persistence.OneToOne") ||
-                    hasAnnotation(field, "jakarta.persistence.OneToOne")) {
-                String fieldName = field.getSimpleName().toString();
-                toEntity.addAnnotation(AnnotationSpec.builder(ClassName.get("org.mapstruct", "Mapping"))
-                        .addMember("target", "$S", fieldName)
-                        .addMember("ignore", "true")
-                        .build());
-            }
-        }
-        builder.addMethod(toEntity.build());
-
-        return builder.build();
     }
 
-    private TypeSpec buildRepository(TypeElement entity, String entitySimple) {
+    builder.addMethod(toEntity.build());
+
+    return builder.build();
+}
+
+private TypeSpec buildRepository(TypeElement entity, String entitySimple) {
         String repoName = entitySimple + "Repository";
         String entityPkg = elementUtils.getPackageOf(entity).getQualifiedName().toString();
 
